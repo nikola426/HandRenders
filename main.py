@@ -221,7 +221,13 @@ def main() -> None:
 
     if not args.reference.is_file():
         parser.error(f"Файл-образец не найден: {args.reference}")
-    source_path = args.source or _find_source(args.reference)
+    if args.source is None:
+        try:
+            source_path = _find_source(args.reference)
+        except ValueError as error:
+            parser.error(str(error))
+    else:
+        source_path = args.source
     if not source_path.is_file():
         parser.error(f"Исходное изображение не найдено: {source_path}")
     if source_path.resolve() == args.reference.resolve():
