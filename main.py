@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import importlib
+import os
+import platform
 from pathlib import Path
+import sys
 
 from PIL import Image, ImageDraw, ImageOps
 
@@ -166,6 +170,33 @@ def _find_source(reference_path: Path) -> Path:
     return candidates[0]
 
 
+def _wait_for_keypress() -> None:
+    if platform.system() == "Windows":
+        getch = getattr(importlib.import_module("msvcrt"), "getch", None)
+        if not callable(getch):
+            raise RuntimeError("В этой версии Windows недоступно чтение клавиши.")
+        print("Нажмите любую клавишу для выхода...", end="", flush=True)
+        getch()
+        return
+
+    if not sys.stdin.isatty():
+        input("Нажмите Enter для выхода...")
+        return
+
+    import termios
+    import tty
+
+    file_descriptor = sys.stdin.fileno()
+    previous_settings = termios.tcgetattr(file_descriptor)
+    try:
+        tty.setraw(file_descriptor)
+        print("Нажмите любую клавишу для выхода...", end="", flush=True)
+        os.read(file_descriptor, 1)
+    finally:
+        termios.tcsetattr(file_descriptor, termios.TCSADRAIN, previous_settings)
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Выравнивает изображение товара по изображению-образцу."
@@ -198,7 +229,8 @@ def main() -> None:
 
     output_path = args.output or DEFAULT_OUTPUT_DIR / f"{source_path.stem}.webp"
     align_image(args.reference, source_path, output_path)
-    print(f"Результат сохранён: {output_path}")
+    print(f"Результат сохранён")
+    _wait_for_keypress()
 
 
 if __name__ == "__main__":
