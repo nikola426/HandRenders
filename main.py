@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import argparse
 from collections import Counter
 import importlib
 import os
@@ -115,6 +114,7 @@ def _solid_background_color(image: Image.Image) -> tuple[int, int, int]:
     """
     rgb = image.convert("RGB")
     border = [_rgb_pixel(rgb, point) for point in _border_points(rgb.size)]
+    
     # Корзины сглаживают небольшие колебания цвета, которые часто появляются
     # при сжатии изображения с потерями.
     dominant_bin, _ = Counter(
@@ -368,62 +368,39 @@ def _wait_for_keypress() -> None:
 
 
 def main() -> None:
-    """Разбирает аргументы запуска, запускает обработку и ждёт выхода.
+    """Запускает обработку изображения и ожидает нажатия клавиши для выхода.
 
-    Параметры берутся из командной строки: путь к образцу, исходному
-    изображению и необязательный путь результата. Если источник не задан,
-    он автоматически выбирается в папке образца.
-
-    Args:
-        Нет. Аргументы программы читаются из `sys.argv`.
+    Путь к образцу, исходное изображение и папка результата задаются
+    константами программы. Дополнительные аргументы командной строки
+    не поддерживаются.
 
     Returns:
-        `None`. При некорректных путях или числе исходников argparse выводит
-        сообщение и завершает работу с ненулевым кодом.
+        `None`. При ошибке запуска программа завершает работу с сообщением.
     """
-    parser = argparse.ArgumentParser(
-        description="Выравнивает изображение товара по изображению-образцу."
-    )
-    parser.add_argument(
-        "--reference",
-        type=Path,
-        default=DEFAULT_REFERENCE,
-        help="Путь к изображению-образцу (по умолчанию: Исходники/1.webp).",
-    )
-    parser.add_argument(
-        "--source",
-        type=Path,
-        help="Путь к изображению товара; по умолчанию ищется рядом с образцом.",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        help="Путь к результату; по умолчанию: Результат/<имя исходника>.webp.",
-    )
-    args = parser.parse_args()
+    if len(sys.argv) > 1:
+        raise SystemExit(
+            "Аргументы командной строки не поддерживаются. "
+            "Запустите программу командой: python main.py"
+        )
 
     # Проверяем образец до поиска исходника, чтобы сообщить о проблеме с
     # обязательным входным файлом непосредственно.
-    if not args.reference.is_file():
-        parser.error(f"Файл-образец не найден: {args.reference}")
-    if args.source is None:
-        try:
-            source_path = _find_source(args.reference)
-        except ValueError as error:
-            # Преобразуем внутреннюю ошибку выбора файла в штатное сообщение
-            # командной строки без traceback.
-            parser.error(str(error))
-    else:
-        source_path = args.source
+    if not DEFAULT_REFERENCE.is_file():
+        raise SystemExit(f"Файл-образец не найден: {DEFAULT_REFERENCE}")
+    try:
+        source_path = _find_source(DEFAULT_REFERENCE)
+    except ValueError as error:
+        # Показываем понятную причину, если рядом с образцом нет ровно одного
+        # исходного изображения, вместо необработанного traceback.
+        raise SystemExit(str(error)) from error
     if not source_path.is_file():
-        parser.error(f"Исходное изображение не найдено: {source_path}")
-    if source_path.resolve() == args.reference.resolve():
-        parser.error("Исходное изображение и образец не должны совпадать.")
+        raise SystemExit(f"Исходное изображение не найдено: {source_path}")
+    if source_path.resolve() == DEFAULT_REFERENCE.resolve():
+        raise SystemExit("Исходное изображение и образец не должны совпадать.")
 
-    # Если путь результата не задан, сохраняем WEBP с исходным именем
-    # в стандартную папку результата.
-    output_path = args.output or DEFAULT_OUTPUT_DIR / f"{source_path.stem}.webp"
-    align_image(args.reference, source_path, output_path)
+    # Сохраняем WEBP с именем исходного изображения в стандартную папку.
+    output_path = DEFAULT_OUTPUT_DIR / f"{source_path.stem}.webp"
+    align_image(DEFAULT_REFERENCE, source_path, output_path)
     print(f"Результат сохранён")
     _wait_for_keypress()
 
