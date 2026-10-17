@@ -65,7 +65,7 @@ def _alpha_pixel(image: Image.Image, point: tuple[int, int]) -> int:
     return pixel
 
 
-def _rgb_pixel(image: Image.Image, point: tuple[int, int]) -> tuple[int, int, int]:
+def _rgb_pixel(image: Image.Image, point: tuple[int, int]) -> tuple:
     """Читает RGB-пиксель и возвращает его цвет как кортеж каналов.
 
     Args:
@@ -81,7 +81,7 @@ def _rgb_pixel(image: Image.Image, point: tuple[int, int]) -> tuple[int, int, in
     pixel = image.getpixel(point)
     if not isinstance(pixel, tuple) or len(pixel) != 3:
         raise ValueError("Ожидалось RGB-изображение.")
-    return pixel[0], pixel[1], pixel[2]
+    return pixel
 
 
 def _has_transparent_background(image: Image.Image) -> bool:
@@ -96,6 +96,7 @@ def _has_transparent_background(image: Image.Image) -> bool:
     """
     alpha = image.getchannel("A")
     points = _border_points(image.size)
+    
     # Частично прозрачные пиксели считаются фоном, чтобы учитывать сглаженные
     # края изображения, сохранённого с альфа-каналом.
     transparent = sum(_alpha_pixel(alpha, point) <= 16 for point in points)
