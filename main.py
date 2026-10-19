@@ -167,6 +167,7 @@ def _opaque_foreground_mask(
     marked = rgb.convert("RGBA")
     alpha = marked.getchannel("A")
     points = _border_points(rgb.size)
+    
     # Ограничиваем число начальных точек заливки примерно пятьюстами,
     # чтобы не запускать операцию для каждого пикселя периметра.
     step = max(1, len(points) // 500)
@@ -348,7 +349,12 @@ def _wait_for_keypress() -> None:
         return
 
     if not sys.stdin.isatty():
-        input("Нажмите Enter для выхода...")
+        try:
+            input("Нажмите Enter для выхода...")
+        except EOFError:
+            # При перенаправленном вводе в CI/скриптовых средах конец потока
+            # может наступить сразу, поэтому безопасно выходим без исключения.
+            return
         return
 
     import termios
