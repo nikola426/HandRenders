@@ -1,13 +1,15 @@
 """Выравнивание изображения товара по масштабу и расположению образца.
 
-По умолчанию программа использует `Исходники/1.webp` как образец и ищет ровно
-одно исходное изображение в той же папке. Итоговое WEBP-изображение помещается
-в папку `Результат`. Если у изображений прозрачный фон, используется альфа-канал;
-иначе программа пытается определить сплошной фон по цветам на краях кадра.
+По умолчанию программа использует `Исходники/1.webp` как образец и обрабатывает
+все остальные изображения в той же папке параллельно. Итоговые WEBP-изображения
+помещаются в папку `Результат`. Если у изображений прозрачный фон, используется
+альфа-канал; иначе программа пытается определить сплошной фон по цветам на краях
+кадра.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 import importlib
 import os
@@ -297,17 +299,17 @@ def align_image(
     canvas.save(output_path, format="WEBP", quality=95, method=6)
 
 
-def _find_source(reference_path: Path) -> Path:
-    """Находит единственное изображение-источник рядом с образцом.
+def _find_sources(reference_path: Path) -> list[Path]:
+    """Находит изображения-источники рядом с образцом.
 
     Args:
         reference_path: Путь к образцу; поиск выполняется в той же папке.
 
     Returns:
-        Путь к единственному подходящему файлу, кроме самого образца.
+        Отсортированный список подходящих файлов, кроме самого образца.
 
     Raises:
-        ValueError: Если найдено ноль или больше одного подходящего файла.
+        ValueError: Если не найдено ни одного подходящего файла.
     """
     candidates = sorted(
         path
@@ -316,12 +318,70 @@ def _find_source(reference_path: Path) -> Path:
         and path != reference_path
         and path.suffix.lower() in SUPPORTED_EXTENSIONS
     )
-    if len(candidates) != 1:
+    if not candidates:
         raise ValueError(
-            f"Ожидалось ровно одно изображение рядом с образцом "
-            f"{reference_path.name}, найдено: {len(candidates)}."
+            f"Не найдено исходных изображений рядом с образцом "
+            f"{reference_path.name}."
         )
-    return candidates[0]
+    return candidates
+
+
+async def _process_sources(
+    reference_path: Path,
+    source_paths: list[Path],
+    output_dir: Path,
+) -> None:
+    """Параллельно обрабатывает исходные изображения в рабочих потоках.
+
+    Args:
+        reference_path: Путь к изображению-образцу.
+        source_paths: Пути к исходным изображениям.
+        output_dir: Папка для итоговых изображений.
+
+    Raises:
+        RuntimeError: Если обработка одного или нескольких изображений
+            завершилась ошибкой.
+        ValueError: Если несколько исходников приводят к одинаковым именам
+            выходных файлов.
+    """
+    output_paths = [
+        output_dir / f"{source_path.stem}.webp" for source_path in source_paths
+    ]
+    if len({path.name.casefold() for path in output_paths}) != len(output_paths):
+        raise ValueError(
+            "Имена исходных файлов должны быть уникальны без учёта регистра, "
+            "чтобы не перезаписывать результаты."
+        )
+
+    results = await asyncio.gather(
+        *(
+            asyncio.to_thread(
+                align_image,
+                reference_path,
+                source_path,
+                output_path,
+            )
+            for source_path, output_path in zip(source_paths, output_paths)
+        ),
+        return_exceptions=True,
+    )
+
+    errors = []
+    for source_path, output_path, result in zip(
+        source_paths, output_paths, results
+    ):
+        if isinstance(result, BaseException):
+            if not isinstance(result, Exception):
+                raise result
+            errors.append(f"{source_path}: {result}")
+        else:
+            print(f"Результат сохранён: {output_path}")
+
+    if errors:
+        raise RuntimeError(
+            "Не удалось обработать некоторые изображения:\n"
+            + "\n".join(errors)
+        )
 
 
 def _wait_for_keypress() -> None:
@@ -374,11 +434,10 @@ def _wait_for_keypress() -> None:
 
 
 def main() -> None:
-    """Запускает обработку изображения и ожидает нажатия клавиши для выхода.
+    """Запускает обработку изображений и ожидает нажатия клавиши для выхода.
 
-    Путь к образцу, исходное изображение и папка результата задаются
-    константами программы. Дополнительные аргументы командной строки
-    не поддерживаются.
+    Путь к образцу и папка результата задаются константами программы.
+    Дополнительные аргументы командной строки не поддерживаются.
 
     Returns:
         `None`. При ошибке запуска программа завершает работу с сообщением.
@@ -394,20 +453,25 @@ def main() -> None:
     if not DEFAULT_REFERENCE.is_file():
         raise SystemExit(f"Файл-образец не найден: {DEFAULT_REFERENCE}")
     try:
-        source_path = _find_source(DEFAULT_REFERENCE)
+        source_paths = _find_sources(DEFAULT_REFERENCE)
     except ValueError as error:
-        # Показываем понятную причину, если рядом с образцом нет ровно одного
-        # исходного изображения, вместо необработанного traceback.
         raise SystemExit(str(error)) from error
-    if not source_path.is_file():
-        raise SystemExit(f"Исходное изображение не найдено: {source_path}")
-    if source_path.resolve() == DEFAULT_REFERENCE.resolve():
-        raise SystemExit("Исходное изображение и образец не должны совпадать.")
+    for source_path in source_paths:
+        if not source_path.is_file():
+            raise SystemExit(f"Исходное изображение не найдено: {source_path}")
+        if source_path.resolve() == DEFAULT_REFERENCE.resolve():
+            raise SystemExit("Исходное изображение и образец не должны совпадать.")
 
-    # Сохраняем WEBP с именем исходного изображения в стандартную папку.
-    output_path = DEFAULT_OUTPUT_DIR / f"{source_path.stem}.webp"
-    align_image(DEFAULT_REFERENCE, source_path, output_path)
-    print(f"Результат сохранён")
+    try:
+        asyncio.run(
+            _process_sources(
+                DEFAULT_REFERENCE,
+                source_paths,
+                DEFAULT_OUTPUT_DIR,
+            )
+        )
+    except (RuntimeError, ValueError) as error:
+        raise SystemExit(str(error)) from error
     _wait_for_keypress()
 
 
